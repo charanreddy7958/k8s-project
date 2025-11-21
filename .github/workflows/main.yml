@@ -36,7 +36,7 @@ jobs:
 
     - name: Verify Kubernetes connection
       run: |
-        kubectl version --short
+        kubectl version --client
         kubectl get nodes
 
     - name: Deploy to Kubernetes
