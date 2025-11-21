@@ -1,20 +1,20 @@
-name: CI-CD to Kubernetes
+name: Deploy to Kubeadm Kubernetes Cluster
 
 on:
   push:
     branches: [ "main" ]
 
 jobs:
-  build-deploy:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
-    # -------------------
-    # AWS LOGIN
-    # -------------------
+    # --------------------------
+    # AWS + ECR LOGIN
+    # --------------------------
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
@@ -23,38 +23,62 @@ jobs:
         aws-region: ${{ secrets.AWS_REGION }}
 
     - name: Login to Amazon ECR
-      id: ecr
+      id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    # -------------------
-    # BUILD + PUSH DOCKER IMAGE
-    # -------------------
-    - name: Build Docker Image
+    # --------------------------
+    # BUILD & PUSH IMAGE
+    # --------------------------
+    - name: Build & Push Docker Image
       run: |
-        docker build -t ${{ steps.ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:latest .
+        IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest"
 
-    - name: Push Docker Image
+        docker build -t $IMAGE .
+        docker push $IMAGE
+
+        echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+    # --------------------------
+    # SETUP SSH TUNNEL TO CLUSTER
+    # --------------------------
+    - name: Install SSH Client
+      run: sudo apt-get install -y openssh-client
+
+    - name: Setup SSH Key
       run: |
-        docker push ${{ steps.ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:latest
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H ${{ secrets.MASTER_PUBLIC_IP }} >> ~/.ssh/known_hosts
 
-    # -------------------
-    # SETUP KUBECONFIG
-    # -------------------
+    - name: Create SSH Tunnel
+      run: |
+        ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -f -N \
+        -L 6443:172.31.33.24:6443 ubuntu@${{ secrets.MASTER_PUBLIC_IP }}
+
+    # --------------------------
+    # CREATE KUBECONFIG
+    # --------------------------
     - name: Create kubeconfig
       run: |
-        echo "${{ secrets.KUBECONFIG_DATA }}" > kubeconfig
+        echo "${{ secrets.KUBECONFIG_DATA }}" | base64 -d > kubeconfig
         chmod 600 kubeconfig
 
-    # -------------------
-    # APPLY K8S MANIFESTS
-    # -------------------
-    - name: Deploy to Kubernetes
+    # --------------------------
+    # DEPLOY TO KUBERNETES
+    # --------------------------
+    - name: Update Deployment Image
       run: |
-        kubectl --kubeconfig=kubeconfig set image deployment/html-app html-app=${{ steps.ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:latest || true
+        kubectl --kubeconfig=kubeconfig set image deployment/html-app \
+        html-app=$IMAGE || true
+
+    - name: Apply Kubernetes Manifests
+      run: |
         kubectl --kubeconfig=kubeconfig apply -f k8s/deployment.yaml
         kubectl --kubeconfig=kubeconfig apply -f k8s/service.yaml
 
     - name: Verify Deployment
       run: |
+        kubectl --kubeconfig=kubeconfig get nodes
         kubectl --kubeconfig=kubeconfig get pods -o wide
         kubectl --kubeconfig=kubeconfig get svc -o wide
