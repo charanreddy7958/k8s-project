@@ -1,70 +1,69 @@
-name: Deploy to Kubeadm Kubernetes Cluster
+name: Deploy NGINX App to EKS
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-    # --------------------------
-    # AWS + ECR LOGIN
-    # --------------------------
-    - name: Configure AWS Credentials
+    # -------------------------
+    # Configure AWS Credentials
+    # -------------------------
+    - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ secrets.AWS_REGION }}
 
+    # -------------------------
+    # LOGIN TO ECR
+    # -------------------------
     - name: Login to Amazon ECR
-      id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    # --------------------------
+    # -------------------------
     # BUILD & PUSH IMAGE
-    # --------------------------
-    - name: Build & Push Docker Image
+    # -------------------------
+    - name: Build, tag and push image to ECR
+      env:
+        ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
       run: |
-        IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest"
+        IMAGE_TAG=latest
+        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-        docker build -t $IMAGE .
-        docker push $IMAGE
+        docker build -t $ECR_REPOSITORY .
+        docker tag $ECR_REPOSITORY:latest $ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
 
-        echo "IMAGE=$IMAGE" >> $GITHUB_ENV
-
-   # 7. Update kubeconfig for EKS
-    - name: Update kubeconfig
+    # -------------------------
+    # UPDATE KUBECONFIG FOR EKS
+    # -------------------------
+    - name: Update kubeconfig for EKS
       run: |
-         aws eks update-kubeconfig \
+        aws eks update-kubeconfig \
           --name ${{ secrets.EKS_CLUSTER_NAME }} \
           --region ${{ secrets.AWS_REGION }}
-          
-    # 🚀 CREATE NAMESPACE IF NOT PRESENT
-    - name: Apply namespace manifest
-      run: |
-          kubectl apply -f kubernetes/namespace.yaml
-          kubectl apply -f kubernetes/deploy.yaml -n ${{ secrets.K8S_NAMESPACE }}
-          kubectl apply -f kubernetes/service.yaml
 
-    # 8. Deploy to EKS
-    - name: Deploy to eks cluster
+    # -------------------------
+    # APPLY MANIFESTS
+    # -------------------------
+    - name: Deploy to EKS
       run: |
-        export KUBECONFIG=~/.kube/config
-    
         ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
         kubectl set image deployment/html-deploy \
-        web=$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
-        -n ${{ secrets.K8S_NAMESPACE }}
-  
-        kubectl rollout status deployment/html-deploy \
-        -n ${{ secrets.K8S_NAMESPACE }} --timeout=200s
+          web=$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
 
+        kubectl rollout status deployment/html-deploy --timeout=200s || kubectl describe deployment/html-deploy
 
-            
+    - name: Verify
+      run: |
+        kubectl get pods -o wide
+        kubectl get svc -o wide
