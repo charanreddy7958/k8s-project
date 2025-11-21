@@ -53,14 +53,18 @@ jobs:
           kubectl apply -f kubernetes/service.yaml
 
     # 8. Deploy to EKS
-    - name: Deploy to EKS
+    - name: Deploy to eks cluster
       run: |
-         ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          kubectl set image deployment/train-ticket-deployment \
-            train-ticket-container=$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
-            -n ${{ secrets.K8S_NAMESPACE }}
+        export KUBECONFIG=~/.kube/config
+    
+        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-          kubectl rollout status deployment/train-ticket-deployment \
-            -n ${{ secrets.K8S_NAMESPACE }} --timeout=200s
+        kubectl set image deployment/html-deploy \
+        web=$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
+        -n ${{ secrets.K8S_NAMESPACE }}
+  
+        kubectl rollout status deployment/html-deploy \
+        -n ${{ secrets.K8S_NAMESPACE }} --timeout=200s
+
 
             
