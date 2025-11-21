@@ -49,7 +49,7 @@ jobs:
     - name: Apply namespace manifest
       run: |
           kubectl apply -f kubernetes/namespace.yaml
-          kubectl apply -f kubernetes/deployment.yaml -n ${{ secrets.K8S_NAMESPACE }}
+          kubectl apply -f kubernetes/deploy.yaml -n ${{ secrets.K8S_NAMESPACE }}
           kubectl apply -f kubernetes/service.yaml
 
     # 8. Deploy to EKS
