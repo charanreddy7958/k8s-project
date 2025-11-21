@@ -1,19 +1,21 @@
-name: Deploy HTML to Kubernetes
+name: CI-CD to Kubernetes
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
 
 jobs:
-  build:
-    name: Build & Deploy
+  build-deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout repository
+    - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Configure AWS credentials
+    # -------------------
+    # AWS LOGIN
+    # -------------------
+    - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -21,27 +23,38 @@ jobs:
         aws-region: ${{ secrets.AWS_REGION }}
 
     - name: Login to Amazon ECR
+      id: ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Build, Tag and Push Docker image
+    # -------------------
+    # BUILD + PUSH DOCKER IMAGE
+    # -------------------
+    - name: Build Docker Image
       run: |
-        IMAGE=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
-        docker build -t $IMAGE .
-        docker push $IMAGE
+        docker build -t ${{ steps.ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:latest .
 
-    - name: Configure kubectl
+    - name: Push Docker Image
       run: |
-        mkdir -p ~/.kube
-        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+        docker push ${{ steps.ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:latest
 
-    - name: Verify Kubernetes connection
+    # -------------------
+    # SETUP KUBECONFIG
+    # -------------------
+    - name: Create kubeconfig
       run: |
-        kubectl version --client
-        kubectl get nodes
+        echo "${{ secrets.KUBECONFIG_DATA }}" > kubeconfig
+        chmod 600 kubeconfig
 
+    # -------------------
+    # APPLY K8S MANIFESTS
+    # -------------------
     - name: Deploy to Kubernetes
       run: |
-        kubectl set image deployment/html-deploy web=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest
-        kubectl apply -f k8s/deployment.yaml
-        kubectl apply -f k8s/service.yaml
-        kubectl rollout status deployment/html-deploy
+        kubectl --kubeconfig=kubeconfig set image deployment/html-app html-app=${{ steps.ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:latest || true
+        kubectl --kubeconfig=kubeconfig apply -f k8s/deployment.yaml
+        kubectl --kubeconfig=kubeconfig apply -f k8s/service.yaml
+
+    - name: Verify Deployment
+      run: |
+        kubectl --kubeconfig=kubeconfig get pods -o wide
+        kubectl --kubeconfig=kubeconfig get svc -o wide
