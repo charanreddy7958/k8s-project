@@ -59,9 +59,11 @@ jobs:
         ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
         kubectl set image deployment/html-deploy \
-        web=$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest \ -n dev
+        web=$ACCOUNT_ID.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest \ 
+        -n dev
 
-        kubectl rollout status deployment/html-deploy \ -n dev --timeout=200s || kubectl describe deployment/html-deploy -n dev
+        kubectl rollout status deployment/html-deploy \ 
+          -n dev --timeout=200s || kubectl describe deployment/html-deploy -n dev
 
 
     - name: Verify
