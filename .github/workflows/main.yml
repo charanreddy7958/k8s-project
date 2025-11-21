@@ -39,3 +39,4 @@ jobs:
         kubectl set image deployment/html-deploy web=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:latest --record
         kubectl apply -f k8s/deployment.yaml
         kubectl apply -f k8s/service.yaml
+        
